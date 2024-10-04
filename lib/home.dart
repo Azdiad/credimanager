@@ -11,17 +11,57 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final Box<UserModel> userBox = Hive.box<UserModel>('users');
 
-  double getTotalBalance() {
+  // Using ValueNotifier to track totals
+  ValueNotifier<double> totalBalanceNotifier = ValueNotifier(0);
+  ValueNotifier<double> totalDebitNotifier = ValueNotifier(0);
+  ValueNotifier<double> totalCreditNotifier = ValueNotifier(0);
+
+  @override
+  void initState() {
+    super.initState();
+    _updateTotals(); // Initialize totals on startup
+  }
+
+  void _updateTotals() {
     double totalBalance = 0;
+    double totalDebit = 0;
+    double totalCredit = 0;
+
     for (var user in userBox.values) {
-      totalBalance += user.transactions.fold(
-        0,
-        (sum, transaction) => transaction.isDebit
-            ? sum - transaction.amount
-            : sum + transaction.amount,
-      );
+      totalBalance += user.transactions?.fold(
+            0,
+            (sum, transaction) => transaction.isDebit
+                ? sum! - transaction.amount
+                : sum! + transaction.amount,
+          ) ??
+          0;
+
+      totalDebit += getTotalDebitForUser(user);
+      totalCredit += getTotalCreditForUser(user);
     }
-    return totalBalance;
+
+    // Update the notifiers
+    totalBalanceNotifier.value = totalBalance;
+    totalDebitNotifier.value = totalDebit;
+    totalCreditNotifier.value = totalCredit;
+  }
+
+  double getTotalDebitForUser(UserModel user) {
+    return user.transactions?.fold(
+          0,
+          (sum, transaction) =>
+              transaction.isDebit ? sum! + transaction.amount : sum,
+        ) ??
+        0;
+  }
+
+  double getTotalCreditForUser(UserModel user) {
+    return user.transactions?.fold(
+          0,
+          (sum, transaction) =>
+              !transaction.isDebit ? sum! + transaction.amount : sum,
+        ) ??
+        0;
   }
 
   void _addUser() {
@@ -46,7 +86,7 @@ class _HomePageState extends State<HomePage> {
                   UserModel newUser =
                       UserModel(name: userName, transactions: []);
                   userBox.add(newUser);
-                  setState(() {}); // To refresh UI after adding user
+                  _updateTotals(); // Update totals after adding user
                 }
                 Navigator.pop(context);
               },
@@ -63,62 +103,117 @@ class _HomePageState extends State<HomePage> {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.teal, // App bar color
-        title: Text(
-          'Total Balance: \$${getTotalBalance().toStringAsFixed(2)}',
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            fontSize: 20, // Increased font size
-          ),
+        title: ValueListenableBuilder<double>(
+          valueListenable: totalBalanceNotifier,
+          builder: (context, totalBalance, _) {
+            return Text(
+              'Total Balance: \$${totalBalance.toStringAsFixed(2)}',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 20, // Increased font size
+              ),
+            );
+          },
         ),
         centerTitle: true,
       ),
-      body: ValueListenableBuilder(
-        valueListenable: userBox.listenable(),
-        builder: (context, Box<UserModel> box, _) {
-          if (box.isEmpty) {
-            return Center(child: Text('No users added yet'));
-          } else {
-            return ListView.builder(
-              itemCount: box.length,
-              itemBuilder: (context, index) {
-                UserModel user = box.getAt(index)!;
-                double balance = user.transactions.fold(
-                  0,
-                  (sum, transaction) => transaction.isDebit
-                      ? sum - transaction.amount
-                      : sum + transaction.amount,
-                );
-                return Card(
-                  margin:
-                      const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-                  elevation: 4,
-                  color: Colors.white, // Card background color
-                  child: ListTile(
-                    title: Text(
-                      user.name,
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: Colors.teal, // Text color
-                      ),
-                    ),
-                    subtitle: Text(
-                      'Balance: \$${balance.toStringAsFixed(2)}',
-                      style:
-                          TextStyle(color: Colors.grey[600]), // Subtitle color
-                    ),
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => UserDetailPage(user, index),
-                        ),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          return Column(
+            children: [
+              ValueListenableBuilder<double>(
+                valueListenable: totalDebitNotifier,
+                builder: (context, totalDebit, _) {
+                  return Text(
+                    'Total Debit: \$${totalDebit.toStringAsFixed(2)}',
+                    style: TextStyle(color: Colors.red), // Total debit color
+                  );
+                },
+              ),
+              ValueListenableBuilder<double>(
+                valueListenable: totalCreditNotifier,
+                builder: (context, totalCredit, _) {
+                  return Text(
+                    'Total Credit: \$${totalCredit.toStringAsFixed(2)}',
+                    style: TextStyle(color: Colors.green), // Total credit color
+                  );
+                },
+              ),
+              Expanded(
+                child: ValueListenableBuilder(
+                  valueListenable: userBox.listenable(),
+                  builder: (context, Box<UserModel> box, _) {
+                    if (box.isEmpty) {
+                      return Center(child: Text('No users added yet'));
+                    } else {
+                      return ListView.builder(
+                        itemCount: box.length,
+                        itemBuilder: (context, index) {
+                          UserModel user = box.getAt(index)!;
+                          double balance = user.transactions?.fold(
+                                0,
+                                (sum, transaction) => transaction.isDebit
+                                    ? sum! - transaction.amount
+                                    : sum! + transaction.amount,
+                              ) ??
+                              0;
+                          double totalDebit = getTotalDebitForUser(user);
+                          double totalCredit = getTotalCreditForUser(user);
+
+                          return Card(
+                            margin: const EdgeInsets.symmetric(
+                                vertical: 8, horizontal: 16),
+                            elevation: 4,
+                            color: Colors.white, // Card background color
+                            child: ListTile(
+                              title: Text(
+                                user.name,
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.teal, // Text color
+                                ),
+                              ),
+                              subtitle: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Balance: \$${balance.toStringAsFixed(2)}',
+                                    style: TextStyle(
+                                        color:
+                                            Colors.grey[600]), // Subtitle color
+                                  ),
+                                  Text(
+                                    'Total Debit: \$${totalDebit.toStringAsFixed(2)}',
+                                    style: TextStyle(color: Colors.red),
+                                  ),
+                                  Text(
+                                    'Total Credit: \$${totalCredit.toStringAsFixed(2)}',
+                                    style: TextStyle(color: Colors.green),
+                                  ),
+                                ],
+                              ),
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        UserDetailPage(user, index),
+                                  ),
+                                ).then((_) {
+                                  // Update totals after returning from UserDetailPage
+                                  _updateTotals();
+                                });
+                              },
+                            ),
+                          );
+                        },
                       );
-                    },
-                  ),
-                );
-              },
-            );
-          }
+                    }
+                  },
+                ),
+              ),
+            ],
+          );
         },
       ),
       floatingActionButton: FloatingActionButton(
@@ -130,5 +225,14 @@ class _HomePageState extends State<HomePage> {
         ),
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    // Dispose the notifiers when no longer needed
+    totalBalanceNotifier.dispose();
+    totalDebitNotifier.dispose();
+    totalCreditNotifier.dispose();
+    super.dispose();
   }
 }
